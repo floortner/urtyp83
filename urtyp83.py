@@ -1,23 +1,36 @@
-# yield keyword explained @ https://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do
+# Hands-on with Python and OpenTelemetry
+# This is for educational purpose; Scrapy et al is not used
+
+# https://stackoverflow.com/questions/231767/what-does-the-yield-keyword-do
+# https://tinydb.readthedocs.io/en/latest/index.html
+# https://regex101.com
 
 import argparse
 import requests
 import re
-import bs4 # for parsing of html requests
+import bs4
 import json
-from openpyxl import Workbook # for XLS export
+import glob
+from openpyxl import Workbook
 from datetime import *
 
 class REObject:
-    def __init__(self, url, title):
-        self.url = url
-        self.title = title
+    def __init__(self):
+        self.url = ''
+        self.title = ''
         self.willhaben_id = ''
         self.price = -1
         self.squarefeet = -1
         #self.rooms = -1
         #self.agency = ''
         #first_seen = datetime
+        
+    def from_json(self, json):
+        self.url = json['url']
+        self.title = json['title']
+        self.willhaben_id = json['willhaben_id']
+        self.price = json['price']
+        self.squarefeet = json['squarefeet']
     
     def __str__(self):
         return "REObject: % s\n% s EUR, % sm2, willhaben_id: %s" % (self.title, self.price, self.squarefeet, self.willhaben_id)
@@ -37,24 +50,26 @@ class REObject:
 
 class Urtyp83:
     # constants
-    prefix = 'https://www.willhaben.at/'
-    start_url = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100'
-    block_list = ['518318955', '493482535', '502036847', '502303940', '340792907'] # exclude bogus listings, future: use percentiles
-    max_results = 100
+    BASE_URL = 'https://www.willhaben.at/'
+    START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100'
+    #START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=46'
+    MAX_RESULTS = 2000
+
+    # exclude bogus listings, future: use percentiles
+    block_list = ['518318955', '493482535', '502036847', '502303940', '340792907']
     
     # instance members
-    reobjects = []
-    url_errors = []
-    url_blocked = []
-    next_page = start_url
-
+    next_page = START_URL
+    
     # crawl a single real estate page
     def crawl_re(url):
         res = requests.get(url)
         if res.status_code == 200:
             html = bs4.BeautifulSoup(res.text, 'html.parser')
             
-            reobject = REObject(url, html.title.contents[0])
+            reobject = REObject()
+            reobject.url = url
+            reobject.title = html.title.contents[0]
             
             willhaben_id = re.findall('-\d+\/$', url)[0]
             reobject.willhaben_id = willhaben_id[1:-1]
@@ -84,9 +99,9 @@ class Urtyp83:
             return reobject
 
     # get next page (pagination)
-    def crawl_main(res):
+    def get_next_page(res):
         html = bs4.BeautifulSoup(res.text, 'html.parser')
-        
+
         # get total number or search results
         total_results = html.find_all('h1', {'data-testid': 'result-list-title'})
         total = re.findall('\d*', total_results[0].text.replace('.', ''))[0]
@@ -99,11 +114,11 @@ class Urtyp83:
             for s in soup:
                 print(s['href'])
                 return s['href']
-        except KeyError:
+        except:
             return None
 
     # stats
-    def print_stats(reobjects, url_errors, url_blocked):
+    def print_stats(reobjects, url_errors=None, url_blocked=None):
         total_price = 0
         total_squarefeet = 0
         
@@ -112,27 +127,25 @@ class Urtyp83:
             total_squarefeet = total_squarefeet + reobject.squarefeet
         
         no_objects = len(reobjects)
-        no_errors = len(url_errors)
-        no_blocked = len(url_blocked)
         
-        print(f'Pages crawled: {no_objects} ({no_errors} errors, {no_blocked} blocked)')
+        print(f'Pages crawled: {no_objects}')
 
         print(f'Avg price: {total_price/no_objects}')
         print(f'Avg m2: {total_squarefeet/no_objects}')
         print(f'Price per m2: EUR {total_price/total_squarefeet}')
 
-        if no_errors > 0:
-            print("Errors:")
+        if url_errors != None and url_errors > 0:
+            print(f'Errors:{len(url_errors)}')
             for url_error in url_errors:
                 print(url_error)
 
-        if no_blocked > 0:
-            print("Blocked:")
+        if url_blocked != None and url_blocked > 0:
+            print(f'Blocked:{len(url_blocked)}')
             for url_blocked in url_blocked:
                 print(url_blocked)
 
     # write xls
-    def write_speadsheet(reobjects):
+    def write_speadsheet(reobjects, output_dir):
         wb = Workbook()
         ws = wb.create_sheet('willhaben_crawler', 0) # new sheet is first tab
         
@@ -154,22 +167,36 @@ class Urtyp83:
             row = row + 1
         
         d = datetime.now()
-        fname = f'willhaben_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}.xlsx'
+        fname = f'{output_dir}/willhaben_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}.xlsx'
         wb.save(fname)
         return fname
 
     # write json
-    def write_json(reobjects):
+    def write_json(reobjects, output_dir):
         d = datetime.now()
-        fname = f'willhaben_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}.json'
+        fname = f'{output_dir}/willhaben_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}.json'
         json_file = open(fname, 'w')
         
         j = json.dumps(reobjects, default=vars)
         
         json_file.write(j)
         return fname
+    
+    # read json
+    def read_json(filename):
+        f = open(filename)
+        data = json.load(f)
+        
+        reobjects = []
 
-    # write html
+        for d in data:
+            reobject = REObject()
+            reobject.from_json(d)
+            reobjects.append(reobject)
+            
+        return reobjects
+
+    # write html, for debug purposes
     def write_html(html, fname):
         html_file = open(fname, 'wb')
 
@@ -179,55 +206,86 @@ class Urtyp83:
         html_file.close()
         print(f'File written: {html_file.name}')
 
-    # main -------------------------------------------------------------
-    def letsgo(self):
-        i = 0
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=f'Scrape real estate listings from {Urtyp83.START_URL}')
+    parser.add_argument('-v', '--verbose', action='store_true', help='verbose mode')
+    parser.add_argument('--xls', action='store_true', help='store results in willhaben.xlsx')
+    parser.add_argument('--json', action='store_true', help='store results in json willhaben.json')
+    parser.add_argument('--dir', help='relative path to input/output directory')
+    args = parser.parse_args()
+    
+    inout_dir = "."
+    
+    if args.dir != None:
+        inout_dir = args.dir
+        
+    json_files = []
+    for file in glob.glob(f'{inout_dir}/*.json'):
+        json_files.append(file)
+        
+        day = re.findall("\d\d\d\d-\d\d-\d\d", file)[0]
+        print(file)
+        reobj = Urtyp83.read_json(file)
+        Urtyp83.print_stats(reobj)
 
-        res = requests.get(self.next_page)
-        if res.status_code == 200:
-            
-            urls = re.findall('\"\/iad\/immobilien\/d\/.*?\/\"', res.text) # https://regex101.com
+    exit(1)
+    ur = Urtyp83()
+    
+    reobjects = []
+    url_errors = []
+    url_blocked = []
+
+    i = 0
+    next_url = Urtyp83.START_URL
+    res = None
+    
+    # capture start/end scrape time
+    
+    while i < Urtyp83.MAX_RESULTS:
+
+        if res is None:
+            res = requests.get(next_url)
+            if res.status_code != 200:
+                print(f'Could not parse {next_url}')
+                exit(1)
+
+            urls = re.findall('\"\/iad\/immobilien\/d\/.*?\/\"', res.text) 
             
             for u in urls:
-                url = Urtyp83.prefix + u[1:-1]
-                print(f'{i}: {url}')
+                url = Urtyp83.BASE_URL + u[1:-1]
                 try:
                     reobject = Urtyp83.crawl_re(url)
                     
                     if reobject.willhaben_id not in Urtyp83.block_list:
-                        self.reobjects.append(reobject)
+                        print(f'{i}: {url}')
+                        reobjects.append(reobject)
                         print(reobject)
                         print('---')
                     else:
-                        self.url_blocked.append(url)        
+                        url_blocked.append(url)        
                     
-                except IndexError:
-                    self.url_errors.append(url)
-                except AttributeError:
-                    self.url_errors.append(url)
+                except:
+                    url_errors.append(url)
 
-                i = i+1
-                if i >= Urtyp83.max_results:
+                i += 1
+                if i >= Urtyp83.MAX_RESULTS:
                     break
 
-            self.next_page = Urtyp83.crawl_main(res)
-            return i
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description=f'Scrape real estate listings from {Urtyp83.start_url}')
-    parser.add_argument('--xls', action='store_true', help='store results in willhaben.xlsx')
-    parser.add_argument('--json', action='store_true', help='store results in json willhaben.json')
-    args = parser.parse_args()
+            tmp = Urtyp83.get_next_page(res)
+            if tmp is None:
+                break
+            
+            next_url = Urtyp83.BASE_URL + tmp
+            res = None
+        
+    print(f'{len(reobjects)} properties crawled')
     
-    ur = Urtyp83()
-    print(f'{ur.letsgo()} pages') # TODOOOOOOOOOOO
-    
-    Urtyp83.print_stats(ur.reobjects, ur.url_errors, ur.url_blocked)
+    #ur.print_stats()
         
     if args.xls:
-        print(f'File written: {Urtyp83.write_speadsheet(ur.reobjects)}')
+        print(f'File written: {Urtyp83.write_speadsheet(reobjects, inout_dir)}')
 
     if args.json:
-        print(f'File written: {Urtyp83.write_json(ur.reobjects)}')
+        print(f'File written: {Urtyp83.write_json(reobjects, inout_dir)}')
         
     #write_html(res, 'willhaben.hmtl')
