@@ -12,7 +12,7 @@ import bs4
 import json
 import glob
 from openpyxl import Workbook
-from datetime import *
+import datetime
 
 class REObject:
     def __init__(self):
@@ -55,9 +55,6 @@ class Urtyp83:
     #START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=46'
     MAX_RESULTS = 2000
 
-    # exclude bogus listings, future: use percentiles
-    block_list = ['518318955', '493482535', '502036847', '502303940', '340792907']
-    
     # instance members
     next_page = START_URL
     
@@ -118,7 +115,7 @@ class Urtyp83:
             return None
 
     # stats
-    def print_stats(reobjects, url_errors=None, url_blocked=None):
+    def print_stats(reobjects, url_errors=None):
         total_price = 0
         total_squarefeet = 0
         
@@ -138,11 +135,6 @@ class Urtyp83:
             print(f'Errors:{len(url_errors)}')
             for url_error in url_errors:
                 print(url_error)
-
-        if url_blocked != None and url_blocked > 0:
-            print(f'Blocked:{len(url_blocked)}')
-            for url_blocked in url_blocked:
-                print(url_blocked)
 
     # write xls
     def write_speadsheet(reobjects, output_dir):
@@ -166,14 +158,14 @@ class Urtyp83:
             ws["E"+str(row)] = reobject.url
             row = row + 1
         
-        d = datetime.now()
+        d = datetime.datetime.now()
         fname = f'{output_dir}/willhaben_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}.xlsx'
         wb.save(fname)
         return fname
 
     # write json
     def write_json(reobjects, output_dir):
-        d = datetime.now()
+        d = datetime.datetime.now()
         fname = f'{output_dir}/willhaben_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}.json'
         json_file = open(fname, 'w')
         
@@ -212,6 +204,7 @@ if __name__ == "__main__":
     parser.add_argument('--xls', action='store_true', help='store results in willhaben.xlsx')
     parser.add_argument('--json', action='store_true', help='store results in json willhaben.json')
     parser.add_argument('--dir', help='relative path to input/output directory')
+    parser.add_argument('--read', action='store_true', help='read json files from --dir')
     args = parser.parse_args()
     
     inout_dir = "."
@@ -219,27 +212,73 @@ if __name__ == "__main__":
     if args.dir != None:
         inout_dir = args.dir
         
-    json_files = []
-    for file in glob.glob(f'{inout_dir}/*.json'):
-        json_files.append(file)
+    if args.read:
+
+        json_filenames = []
+        json_timestamps = []
+                
+        for f in glob.glob('*.json'): # TODO inout_dir
+            json_filenames.append(f)
         
-        day = re.findall("\d\d\d\d-\d\d-\d\d", file)[0]
-        print(file)
+        formatter = '%Y-%m-%d_%H-%M'
+        for f in json_filenames:
+            f = f.replace('willhaben_', '')
+            f = f.replace('.json', '')
+            timestamp = datetime.datetime.strptime(f, formatter)
+            json_timestamps.append(timestamp)
+        
+        most_recent = json_timestamps[0]
+        for i in range(len(json_filenames)):
+            #if json_timestamps[i]
+            print(json_filenames[i])
+            print(json_timestamps[i])
+            print('---')
+        
+        exit(1)
+            
         reobj = Urtyp83.read_json(file)
         Urtyp83.print_stats(reobj)
+        print("---")
 
-    exit(1)
+        
+        file_1 = 'willhaben_2021-11-29_23-44.json'
+        file_2 = 'willhaben_2021-11-30_18-35.json'
+        
+        file_1 = file_1.replace('willhaben_', '')
+        file_1 = file_1.replace('.json', '')
+        print(file_1)
+        
+
+        print(timestamp)
+        exit(1)
+        
+        reobj_1 = Urtyp83.read_json(file_1)
+        reobj_2 = Urtyp83.read_json(file_2)
+        
+        Urtyp83.print_stats(reobj_1)
+        Urtyp83.print_stats(reobj_2)
+        print('---')
+        
+        found = []
+        for reobj in reobj_2:
+            for tmp in reobj_1:
+                if tmp.willhaben_id == reobj.willhaben_id:
+                    found.append(tmp)
+                    break
+        
+        print(f'From {len(reobj_1)} properties, {len(reobj_2)-len(found)} have been added.')
+        exit(1)
+    
     ur = Urtyp83()
     
     reobjects = []
     url_errors = []
-    url_blocked = []
 
     i = 0
     next_url = Urtyp83.START_URL
     res = None
     
-    # capture start/end scrape time
+    print(f'[{datetime.datetime.now()}] Starting...')
     
     while i < Urtyp83.MAX_RESULTS:
 
@@ -255,14 +294,11 @@ if __name__ == "__main__":
                 url = Urtyp83.BASE_URL + u[1:-1]
                 try:
                     reobject = Urtyp83.crawl_re(url)
-                    
-                    if reobject.willhaben_id not in Urtyp83.block_list:
-                        print(f'{i}: {url}')
-                        reobjects.append(reobject)
-                        print(reobject)
-                        print('---')
-                    else:
-                        url_blocked.append(url)        
+
+                    print(f'{i}: {url}')
+                    reobjects.append(reobject)
+                    print(reobject)
+                    print('---')
                     
                 except:
                     url_errors.append(url)
@@ -278,14 +314,10 @@ if __name__ == "__main__":
             next_url = Urtyp83.BASE_URL + tmp
             res = None
         
-    print(f'{len(reobjects)} properties crawled')
+    print(f'[{datetime.datetime.now()}]{len(reobjects)} properties crawled')
     
-    #ur.print_stats()
-        
     if args.xls:
         print(f'File written: {Urtyp83.write_speadsheet(reobjects, inout_dir)}')
 
     if args.json:
         print(f'File written: {Urtyp83.write_json(reobjects, inout_dir)}')
-        
-    #write_html(res, 'willhaben.hmtl')
