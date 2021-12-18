@@ -278,7 +278,7 @@ if __name__ == "__main__":
     next_url = Urtyp83.START_URL
     res = None
     
-    print(f'[{datetime.datetime.now()}] Starting...')
+    ts_start = datetime.datetime.now()
     
     while i < Urtyp83.MAX_RESULTS:
 
@@ -314,7 +314,7 @@ if __name__ == "__main__":
             next_url = Urtyp83.BASE_URL + tmp
             res = None
         
-    print(f'[{datetime.datetime.now()}]{len(reobjects)} properties crawled')
+    print(f'DONE: {len(reobjects)} properties crawled [took {datetime.datetime.now()-ts_start}]')
     
     if args.xls:
         print(f'File written: {Urtyp83.write_speadsheet(reobjects, inout_dir)}')

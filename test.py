@@ -1,3 +1,4 @@
+import argparse
 import datetime
 import jsonpickle
 import requests
@@ -8,26 +9,27 @@ from urllib.parse import urlsplit
 
 class prop:
     def __init__(self, id, url, title, price, sqm):
-        self.id = id
-        self.url = url
-        self.title = title
-        self.price = price
-        self.sqm = sqm
+        self.id = str(id)               # excplicit casting to prevent jsonpickle hiccups
+        self.url = str(url)
+        self.title = str(title)
+        self.price = int(price)
+        self.sqm = int(sqm)
     
     def __str__(self):
         return "id: %s, %s EUR, %s m2" % (self.id, self.price, self.sqm)
 
 class scraperrun:
-    def __init__(self, start_url):
+    def __init__(self, start_url, mr = 2000):
         self.props = {}                 # store id:prop pairs
-        self.start_url = start_url      # willhaben url to start run
-        self.ts_start = None            # init defaults ...
-        self.ts_end = None
+        self.start_url = start_url      # willhaben url to start scraping
+        self.ts_start = None            # when the scraping run started
+        self.ts_end = None              # ... end when it finished
+        self.max_results = mr           # guard rail
         
     def __str__(self):
         return f'url: {self.start_url} started: {self.ts_start} props: {len(self.props)}'
     
-    def start_run(self, max_results = 2000):
+    def start_run(self):
         self.ts_start = datetime.datetime.now()
 
         i = 0
@@ -35,11 +37,11 @@ class scraperrun:
 
         next_url = self.start_url
         
-        # get base url, it's always https://www.willhaben.at ;-)
+        # get the base url, it's always https://www.willhaben.at ;-)
         split_url = urlsplit(self.start_url)
         base_url = f'{split_url.scheme}://{split_url.netloc}'
         
-        while i < max_results:
+        while i < self.max_results:
 
             if res is None:
                 # get result page
@@ -61,7 +63,7 @@ class scraperrun:
                         print(f'Cannot parse {u}')
 
                     i += 1
-                    if i >= max_results:
+                    if i >= self.max_results:
                         break
 
                 tmp = scraperrun.get_next_page(res)
@@ -151,6 +153,29 @@ class scraperrun:
         print(f'Avg m2: {(total_squarefeet/no_objects):.2f}')
         print(f'Price per m2: EUR {(total_price/total_squarefeet):.2f}')
     
+    # write json
+    def write_json(self, dir = '.'):
+        d = self.ts_start
+        fname = f'{dir}/run_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}-{d.second}.json'
+        json_file = open(fname, 'w')
+        
+        j = jsonpickle.encode(self)
+        json_file.write(j)
+        
+        return fname
+        
+    # read json
+    def read_json(filename):
+        
+        with open(filename, 'r') as f:
+            
+            str = f.read()
+            print(str)
+            print('---')
+            
+            o = jsonpickle.decode(str)
+            return o
+                
     # convert string containing EUR currency to int (ugly, to be improved)
     def string_to_int(str):
         result = 0
@@ -163,16 +188,25 @@ class scraperrun:
 
 if __name__ == "__main__":
     
-    sr = scraperrun('https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100')
-    sr.start_run(1)
+    parser = argparse.ArgumentParser(description=f'Scrape real estate listings from <TODO>')
+    parser.add_argument('--read', action='store_true', help='read json files from --dir')
+    args = parser.parse_args()
+    
+    if args.read:
+        o = scraperrun.read_json('run_2021-12-12_22-0-58.json').print_stats()
+
+        exit(1) 
+    
+    sr = scraperrun('https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100', 3)
+    sr.start_run()
     sr.end_run()
     sr.print_stats()
-    #sr.write_json('.')
+    sr.write_json()
     
-    sr.props = {}
-    sr.props['345'] = prop('3', '', '', '', '')
     str = jsonpickle.encode(sr)
     print(str)
+    
+    sr.write_json('.')
     
     exit(1)
 
