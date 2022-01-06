@@ -1,30 +1,48 @@
+import logging
 import argparse
 import datetime
-import jsonpickle
-import requests
-import bs4
 import re
+import json
+import jsonpickle
 
 from urllib.parse import urlsplit
+from dataclasses import dataclass
+from dataclasses import field
 
+
+import requests
+import bs4
+import glob
+import Levenshtein
+
+@dataclass(order = True)
 class prop:
+    id: str
+    url: str = field(repr = False)
+    title: str = field(repr = False)
+    price: float
+    sqm: int
+    
+
+""" class prop:
     def __init__(self, id, url, title, price, sqm):
-        self.id = str(id)               # excplicit casting to prevent jsonpickle hiccups
-        self.url = str(url)
-        self.title = str(title)
-        self.price = int(price)
-        self.sqm = int(sqm)
+        self.id = id
+        self.url = url
+        self.title = title
+        self.price = price
+        self.sqm = sqm
     
     def __str__(self):
         return "id: %s, %s EUR, %s m2" % (self.id, self.price, self.sqm)
+ """
 
 class scraperrun:
     def __init__(self, start_url, mr = 2000):
-        self.props = {}                 # store id:prop pairs
         self.start_url = start_url      # willhaben url to start scraping
         self.ts_start = None            # when the scraping run started
         self.ts_end = None              # ... end when it finished
         self.max_results = mr           # guard rail
+        self.props = {}                 # store id:prop pairs
         
     def __str__(self):
         return f'url: {self.start_url} started: {self.ts_start} props: {len(self.props)}'
@@ -47,7 +65,7 @@ class scraperrun:
                 # get result page
                 res = requests.get(next_url)
                 if res.status_code != 200:
-                    print(f'Cannot get {next_url}')
+                    logging.warning(f'Cannot get {next_url}')
                     exit(1)
 
                 # parse all urls from the Javascript section
@@ -58,9 +76,9 @@ class scraperrun:
                     try:
                         p = scraperrun.crawl_page(url)
                         self.props[p.id] = p
-                        print(p)
+                        logging.info(p)
                     except:
-                        print(f'Cannot parse {u}')
+                        logging.warning(f'Cannot parse {u}')
 
                     i += 1
                     if i >= self.max_results:
@@ -73,20 +91,10 @@ class scraperrun:
                 next_url = base_url + tmp
                 res = None
             
-        print(f'{i} properties crawled')
+        logging.info(f'{i} properties crawled')
     
     def end_run(self):
         self.ts_end = datetime.datetime.now()
-    
-    def write_json(self, output_dir):
-        d = datetime.datetime.now()
-        fname = f'{output_dir}/willhaben_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}.json'
-        
-        json_file = open(fname, 'w')
-        str = jsonpickle.encode(self)
-        json_file.write(str)
-        
-        return fname
 
     # crawl one page and return property object
     def crawl_page(url):
@@ -148,35 +156,30 @@ class scraperrun:
         no_objects = len(self.props)
         duration = self.ts_end - self.ts_start
         
+        print(f'Run started: {self.ts_start}')
         print(f'Pages crawled: {no_objects} [{duration}]')
         print(f'Avg price: {(total_price/no_objects):.2f}')
         print(f'Avg m2: {(total_squarefeet/no_objects):.2f}')
         print(f'Price per m2: EUR {(total_price/total_squarefeet):.2f}')
     
-    # write json
+    # write json (FIXME: v1 format)
     def write_json(self, dir = '.'):
         d = self.ts_start
         fname = f'{dir}/run_{d.year}-{d.month}-{d.day}_{d.hour}-{d.minute}-{d.second}.json'
-        json_file = open(fname, 'w')
-        
-        j = jsonpickle.encode(self)
-        json_file.write(j)
+        with open(fname, 'w') as json_file:
+            j = jsonpickle.encode(self)
+            json_file.write(j)
         
         return fname
         
-    # read json
-    def read_json(filename):
-        
-        with open(filename, 'r') as f:
-            
+    # read json (FIXME: v1 format)
+    def read_json(fname):
+        with open(fname, 'r') as f:
             str = f.read()
-            print(str)
-            print('---')
-            
             o = jsonpickle.decode(str)
             return o
                 
-    # convert string containing EUR currency to int (ugly, to be improved)
+    # convert string containing EUR currency to int (FIXME)
     def string_to_int(str):
         result = 0
         if ',' in str:
@@ -188,18 +191,89 @@ class scraperrun:
 
 if __name__ == "__main__":
     
-    parser = argparse.ArgumentParser(description=f'Scrape real estate listings from <TODO>')
-    parser.add_argument('--read', action='store_true', help='read json files from --dir')
-    args = parser.parse_args()
-    
-    if args.read:
-        o = scraperrun.read_json('run_2021-12-12_22-0-58.json').print_stats()
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
 
-        exit(1) 
+    parser = argparse.ArgumentParser(description=f'Scrape real estate listings from <TODO>')
+    parser.add_argument('--debug', action='store_true', help='debug')
+    parser.add_argument('--convert', help='convert from v1 to v2')
+    
+    args = parser.parse_args()
+    logging.debug(args)    
+ 
+    if args.debug:
+        o = scraperrun.read_json('run_2021-12-12_22-0-58.json')
+        o.print_stats()
+        exit(1)
+    
+    if args.convert:
+        logging.info(args.convert)
+        
+        nr_files_read = 0
+
+        for filename in glob.glob('willhaben_*.json'):
+            logging.info(filename)
+            
+            try:
+                # get date from filename v1
+                m = re.findall('willhaben_(.*)\.json', filename)
+                
+                # create datetime object, filename v1 contains timestamp
+                ts = datetime.datetime.strptime(m[0], '%Y-%m-%d_%H-%M')
+
+                # read json file
+                data = None
+                with open(filename) as f:
+                    data = json.load(f)
+                
+                props = {}
+                for p in data:
+                    props[p['willhaben_id']] = prop(p['willhaben_id'], p['url'], p['title'], p['price'], p['squarefeet'])
+                
+                # init scraperrun object
+                v1run = scraperrun('https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz')
+                v1run.props = props
+                v1run.ts_start = ts
+                v1run.ts_end = ts + datetime.timedelta(minutes=10)
+                v1run.max_results = 2000
+                
+                v1run.print_stats()
+                
+                # copy titles into array for sequential iterating
+                titles = []
+                for k, p in v1run.props.items():
+                    titles.append(p.title)
+                
+                # check each title vs. all other titles for similarity
+                nr_titles = len(titles)
+                dupes = 0
+                similarity_cutoff = 0.90
+                
+                for i in range(nr_titles-1):
+                    for j in range(i, nr_titles-1):
+                        r = Levenshtein.ratio(titles[i], titles[j+1])
+                        if r > similarity_cutoff:
+                            dupes += 1
+                            logging.debug(f'{i} x {j+1}: {r:.4f}')
+                            logging.debug(titles[i])
+                            logging.debug(titles[j+1])
+                            logging.debug('-')
+                
+                print(f'Similarity score >{similarity_cutoff}: {dupes} of {nr_titles} ({((dupes/nr_titles)*100):.2f}%)')
+
+                print('---')
+                nr_files_read += 1
+                if nr_files_read > 20:
+                    break
+            
+            except IndexError:
+                logging.error(f'Cannot convert {filename}')
+
+        exit(1)
     
     sr = scraperrun('https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100', 3)
     sr.start_run()
     sr.end_run()
+
     sr.print_stats()
     sr.write_json()
     
@@ -207,35 +281,3 @@ if __name__ == "__main__":
     print(str)
     
     sr.write_json('.')
-    
-    exit(1)
-
-    sr = scraperrun('willhaben.at')
-    sr.start_run()
-    sr.props['345'] = prop('3', '', '', '', '')
-
-    print(sr)
-    for s in sr.props:
-        print(sr.props[s])
-    
-    sr.end_rund()
-    
-    str = jsonpickle.encode(sr)
-    print(str)
-    print('---')
-
-    new_sr = jsonpickle.decode(str)
-    print(new_sr)
-    new_key = '999666333'
-    if new_key in new_sr.props:
-        print('-> already exists')
-    else:
-        print(f'-> adding {new_key}')
-        new_sr.props[new_key] = prop('4', '4', '4', '4', '4')
-
-    for s in new_sr.props:
-        print(new_sr.props[s])
-    
-    runs = []
-    runs.append(sr)
-    runs.append(new_sr)
