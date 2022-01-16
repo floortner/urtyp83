@@ -51,8 +51,9 @@ class REObject:
 class Urtyp83:
     # constants
     BASE_URL = 'https://www.willhaben.at/'
+    #START_URL = 'https://www.willhaben.at/iad/immobilien/eigentumswohnung/oberoesterreich/braunau-am-inn?page=1&rows=100'
+    #START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/braunau-am-inn?page=1&rows=100'
     START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100'
-    #START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=46'
     MAX_RESULTS = 2000
 
     # instance members
@@ -77,6 +78,7 @@ class Urtyp83:
                 i = string_to_int(str)
                 print(f'price: {i}') """
                     
+            #soup = html.find_all(text=re.compile('Kaufpreis'))
             soup = html.find_all(text=re.compile('Gesamtmiete inkl. MWSt'))
             if len(soup) > 0:
                 str = re.findall('\d+[\.|,]?\d*[\.|,]?\d*', soup[0].parent.parent.text)[0]

@@ -15,16 +15,15 @@ import bs4
 import glob
 import Levenshtein
 
-@dataclass(order = True)
-class prop:
-    id: str
-    url: str = field(repr = False)
-    title: str = field(repr = False)
-    price: float
-    sqm: int
-    
+# @dataclass(order = True)
+# class prop:
+#     id: str
+#     url: str #= field(repr = False)
+#     title: str #= field(repr = False)
+#     price: float
+#     sqm: int
 
-""" class prop:
+class prop:
     def __init__(self, id, url, title, price, sqm):
         self.id = id
         self.url = url
@@ -34,7 +33,7 @@ class prop:
     
     def __str__(self):
         return "id: %s, %s EUR, %s m2" % (self.id, self.price, self.sqm)
- """
+
 
 class scraperrun:
     def __init__(self, start_url, mr = 2000):
@@ -55,7 +54,7 @@ class scraperrun:
 
         next_url = self.start_url
         
-        # get the base url, it's always https://www.willhaben.at ;-)
+        # get the base url. just for fun; it's always https://www.willhaben.at ;-)
         split_url = urlsplit(self.start_url)
         base_url = f'{split_url.scheme}://{split_url.netloc}'
         
@@ -172,7 +171,7 @@ class scraperrun:
         
         return fname
         
-    # read json (FIXME: v1 format)
+    # read json (FIXME)
     def read_json(fname):
         with open(fname, 'r') as f:
             str = f.read()
@@ -191,24 +190,29 @@ class scraperrun:
 
 if __name__ == "__main__":
     
-    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
+    DEFAULT_START_URL = 'https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100'
 
     parser = argparse.ArgumentParser(description=f'Scrape real estate listings from <TODO>')
     parser.add_argument('--debug', action='store_true', help='debug')
     parser.add_argument('--convert', help='convert from v1 to v2')
+    parser.add_argument('--url', help=f'willhaben url to start from. default: {DEFAULT_START_URL}')
     
     args = parser.parse_args()
-    logging.debug(args)    
- 
-    if args.debug:
-        o = scraperrun.read_json('run_2021-12-12_22-0-58.json')
-        o.print_stats()
-        exit(1)
+    logging.basicConfig(format='%(asctime)s %(message)s', level=logging.INFO)
     
+    if args.debug:
+        #o = scraperrun.read_json('run_2021-12-12_22-0-58.json')
+        #o.print_stats()
+        l = logging.getLogger()
+        l.setLevel(level=logging.DEBUG)
+    
+    logging.debug(args)
+
     if args.convert:
         logging.info(args.convert)
         
         nr_files_read = 0
+        sruns = []
 
         for filename in glob.glob('willhaben_*.json'):
             logging.info(filename)
@@ -236,48 +240,68 @@ if __name__ == "__main__":
                 v1run.ts_end = ts + datetime.timedelta(minutes=10)
                 v1run.max_results = 2000
                 
-                v1run.print_stats()
-                
-                # copy titles into array for sequential iterating
-                titles = []
-                for k, p in v1run.props.items():
-                    titles.append(p.title)
-                
-                # check each title vs. all other titles for similarity
-                nr_titles = len(titles)
-                dupes = 0
-                similarity_cutoff = 0.90
-                
-                for i in range(nr_titles-1):
-                    for j in range(i, nr_titles-1):
-                        r = Levenshtein.ratio(titles[i], titles[j+1])
-                        if r > similarity_cutoff:
-                            dupes += 1
-                            logging.debug(f'{i} x {j+1}: {r:.4f}')
-                            logging.debug(titles[i])
-                            logging.debug(titles[j+1])
-                            logging.debug('-')
-                
-                print(f'Similarity score >{similarity_cutoff}: {dupes} of {nr_titles} ({((dupes/nr_titles)*100):.2f}%)')
+                sruns.append(v1run)
 
-                print('---')
+                # guard rail
                 nr_files_read += 1
-                if nr_files_read > 20:
+                if nr_files_read >= 1:
                     break
-            
+    
             except IndexError:
                 logging.error(f'Cannot convert {filename}')
+                
+        tmp = []
+        ts = sruns[0].ts_start
+        for i in range(len(sruns)):
+            assert isinstance(sruns[i], scraperrun)
+            r = sruns[i] # type: scraperrun
+            if r.ts_start <= ts:
+                tmp.append(r)
+                
+        
+        for idx in range(len(sruns)):
+            # copy titles into array for sequential iterating
+            titles = []
+            for k, p in sruns[idx].props.items():
+                titles.append(p.title)
+            
+            # check each title vs. all other titles for similarity
+            nr_titles = len(titles)
+            dupes = 0
+            similarity_cutoff = 0.99
+            
+            for i in range(nr_titles-1):
+                for j in range(i, nr_titles-1):
+                    r = Levenshtein.ratio(titles[i], titles[j+1])
+                    if r > similarity_cutoff:
+                        dupes += 1
+                        logging.debug(f'{i} x {j+1}: {r:.4f}')
+                        logging.debug(titles[i])
+                        logging.debug(titles[j+1])
+                        logging.debug('-')
+            
+            
+            sruns[idx].print_stats()
+            print(f'Similarity score >{similarity_cutoff}: {dupes} of {nr_titles} ({((dupes/nr_titles)*100):.2f}%)')
+            print('---')
 
         exit(1)
     
-    sr = scraperrun('https://www.willhaben.at/iad/immobilien/mietwohnungen/oberoesterreich/linz?page=1&rows=100', 3)
+    url = DEFAULT_START_URL
+    if args.url is not None:
+        url = args.url
+        
+    sr = scraperrun(url, 1)
     sr.start_run()
     sr.end_run()
-
     sr.print_stats()
-    sr.write_json()
+    # sr.write_json()
     
-    str = jsonpickle.encode(sr)
-    print(str)
+    #j = jsonpickle.encode(sr)
     
-    sr.write_json('.')
+    
+    
+    #str = jsonpickle.encode(sr)
+    #print(str)
+    
+    #sr.write_json('.')
