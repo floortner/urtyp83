@@ -3,37 +3,36 @@ import argparse
 import datetime
 import re
 import json
+from turtle import clear
 import jsonpickle
 
 from urllib.parse import urlsplit
 from dataclasses import dataclass
 from dataclasses import field
 
-
 import requests
 import bs4
 import glob
 import Levenshtein
 
-# @dataclass(order = True)
-# class prop:
-#     id: str
-#     url: str #= field(repr = False)
-#     title: str #= field(repr = False)
-#     price: float
-#     sqm: int
-
+@dataclass(order = True)
 class prop:
-    def __init__(self, id, url, title, price, sqm):
-        self.id = id
-        self.url = url
-        self.title = title
-        self.price = price
-        self.sqm = sqm
-    
-    def __str__(self):
-        return "id: %s, %s EUR, %s m2" % (self.id, self.price, self.sqm)
+    id: str
+    url: str #= field(repr = False)
+    title: str #= field(repr = False)
+    price: float
+    sqm: int
 
+# class prop:
+#     def __init__(self, id, url, title, price, sqm):
+#         self.id = id
+#         self.url = url
+#         self.title = title
+#         self.price = price
+#         self.sqm = sqm
+#    
+#     def __str__(self):
+#         return "id: %s, %s EUR, %s m2" % (self.id, self.price, self.sqm)
 
 class scraperrun:
     def __init__(self, start_url, mr = 2000):
@@ -74,9 +73,10 @@ class scraperrun:
                     url = base_url + u[1:-1]
                     try:
                         p = scraperrun.crawl_page(url)
+                        #p = prop(i, "url", "title", 1000, 80)
                         self.props[p.id] = p
                         logging.info(p)
-                    except:
+                    except Exception:
                         logging.warning(f'Cannot parse {u}')
 
                     i += 1
@@ -98,9 +98,9 @@ class scraperrun:
     # crawl one page and return property object
     def crawl_page(url):
         res = requests.get(url)
-        html = bs4.BeautifulSoup(res.text, 'html.parser')
+        html = bs4.BeautifulSoup(res.text, 'html.parser') # type: bs4.BeautifulSoup
 
-        title = html.title.contents[0]
+        title = html.title.string
         id = re.findall('-\d+\/$', url)[0][1:-1]
         price = sqm = 0
         
@@ -122,6 +122,8 @@ class scraperrun:
             
         # return valid object or None if bogus
         if sqm > 0 and price > 0 and len(title) > 0 and len(id) > 0:
+            print(f'----------> {type(title)}')
+            print(f'----------> {title}')
             return prop(id, url, title, price, sqm)
         else:
             return None
@@ -145,21 +147,23 @@ class scraperrun:
 
     # stats
     def print_stats(self):
-        total_price = 0
-        total_squarefeet = 0
-        
-        for p in self.props:
-            total_price = total_price + self.props[p].price
-            total_squarefeet = total_squarefeet + self.props[p].sqm
-        
-        no_objects = len(self.props)
-        duration = self.ts_end - self.ts_start
+        no_props = len(self.props)
         
         print(f'Run started: {self.ts_start}')
-        print(f'Pages crawled: {no_objects} [{duration}]')
-        print(f'Avg price: {(total_price/no_objects):.2f}')
-        print(f'Avg m2: {(total_squarefeet/no_objects):.2f}')
-        print(f'Price per m2: EUR {(total_price/total_squarefeet):.2f}')
+        if no_props > 0:
+            total_price = 0
+            total_squarefeet = 0
+            
+            for p in self.props:
+                total_price = total_price + self.props[p].price
+                total_squarefeet = total_squarefeet + self.props[p].sqm
+            
+            print(f'Pages crawled: {no_props} [{self.ts_end - self.ts_start}]')
+            print(f'Avg price: {(total_price/no_props):.2f}')
+            print(f'Avg m2: {(total_squarefeet/no_props):.2f}')
+            print(f'Price per m2: EUR {(total_price/total_squarefeet):.2f}')
+        else:
+            print(f'No pages crawled')
     
     # write json (FIXME: v1 format)
     def write_json(self, dir = '.'):
@@ -291,15 +295,14 @@ if __name__ == "__main__":
     if args.url is not None:
         url = args.url
         
-    sr = scraperrun(url, 1)
+    sr = scraperrun(url, 3)
     sr.start_run()
     sr.end_run()
     sr.print_stats()
     # sr.write_json()
     
-    #j = jsonpickle.encode(sr)
-    
-    
+    # j = jsonpickle.encode(sr)
+    # print(j)
     
     #str = jsonpickle.encode(sr)
     #print(str)
